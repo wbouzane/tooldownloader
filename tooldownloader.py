@@ -1,237 +1,226 @@
 from bs4 import BeautifulSoup
-import httplib2
-import zipfile
+from urllib.request import Request, urlopen
+from urllib.error import  URLError
 from zipfile import ZipFile
+from zipfile import BadZipFile
+import pickle
 import errno
+import glob
 import os
 import re
-import glob
+import sys
 
-# Make sure directory exists
+# Create directory
 def createDir(path):
   try:
     os.makedirs(path)
-  except OSError as exception:
-    if exception.errno != errno.EEXIST:
-      raise
+  except OSError as e:
+    if e.errno != errno.EEXIST:
+      print(e)
 
 # Extract zip files
-def extract(zipFilename, dm_extraction_dir) :
-  zipTest = ZipFile(zipFilename)
-  zipTest.extractall(dm_extraction_dir)
+def extract(filename, directory):
+  if directory != '.':
+    createDir(directory)
+  sys.stdout.write('Extracting... ')
+  try:
+    z = ZipFile(filename)
+    z.extractall(directory)
+    z.close()
+  except BadZipFile as e:
+    print('Error: Zip file is corrupt')
+    return
+  os.remove(filename)
+  sys.stdout.write('Done\n')
+
+# Download file from url
+def getFile(url, filename):
+  req = Request(url)
+
+  try:
+    response = urlopen(req)
+    try:
+      filelastmodified = lastmod[filename]
+    except:
+      lastmod[filename] = ''
+    if lastmod[filename] == response.info().get('last-modified') and os.path.isfile(filename):
+      sys.stdout.write(filename + ' already exists and file on server is not newer.\n')
+      return
+    sys.stdout.write('Downloading ' + filename)
+    filesize = int(response.info().get('content-length'))
+    lefttodownload = filesize
+    subamount = int(filesize / 10)
+    downloadedfile = response.read(0)
+    while lefttodownload != 0:
+      if lefttodownload < subamount:
+        downloadedfile += response.read(lefttodownload)
+        lefttodownload = 0
+      else:
+        downloadedfile += response.read(subamount)
+        lefttodownload -= subamount
+        sys.stdout.write('.')
+        sys.stdout.flush()
+    try:
+      with open(filename, 'wb') as f:
+        f.write(downloadedfile)
+        sys.stdout.write('Done!\n')
+        lastmod[filename] = response.info().get('last-modified')
+        writeCache()
+    except OSError as e:
+      sys.stdout.write('Failed to write file to disk:\n')
+      print(e)
+  except URLError as e:
+    if hasattr(e, 'reason'):
+      print('We failed to reach a server.')
+      print('Reason:', e.reason)
+    elif hasattr(e, 'code'):
+      print('The server couldn\'t fulfill the request.')
+      print('Error code: ', e.code)
+    else:
+      print('unexpected error')
+
+def getPage(url):
+  req = Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+
+  try:
+    return urlopen(req).read()
+  except URLError as e:
+    if hasattr(e, 'reason'):
+      print('We failed to reach a server.')
+      print('Reason:', e.reason)
+    elif hasattr(e, 'code'):
+      print('The server could not fulfill the request.')
+      print('Error code: ', e.code)
+    else:
+      print('unexpected error')
+
+def writeCache():
+  with open('.cache', 'wb') as f:
+    pickle.dump(lastmod, f)
+
+# Download ADWCleaner
+def getADWCleaner():
+  getFile('http://www.infospyware.com/Software/AdwCleaner.exe', 'AdwCleaner.exe')
 
 # Download Auslogics Disk Defragmenter portable
 def getAusDefrag():
-  print("Downloading Auslogics Defrag Portable...")
-
-  response, content = h.request('http://www.auslogics.com/en/downloads/disk-defrag/ausdiskdefragportable.exe')
-
-  print(response.reason)
-
-  with open('ausdiskdefragportable.exe', 'wb') as f:
-    f.write(content)
+  getFile('http://www.auslogics.com/en/downloads/disk-defrag/ausdiskdefragportable.exe', 'ausdiskdefragportable.exe')
 
 # Download Avast
 def getAvast():
-  print("Downloading Avast...")
-
-  response, content = h.request('http://files.avast.com/iavs5x/avast_free_antivirus_setup.exe')
-
-  print(response.reason)
-
-  with open('avast_free_antivirus_setup.exe', 'wb') as f:
-    f.write(content)
+  getFile('http://files.avast.com/iavs5x/avast_free_antivirus_setup.exe', 'avast_free_antivirus_setup.exe')
 
 # Download AVG
 def getAVG():
-  print("Downloading AVG (Offline installer x86, x64, online installer)...")
+  page = getPage('http://free.avg.com/download-free-all-product/')
+  
+  if not page:
+    print('No data returned')
+    return
 
-  response, content = h.request("http://free.avg.com/us-en/download.prd-afh")
-  soup = BeautifulSoup(content)
+  soup = BeautifulSoup(page)
 
   for link in soup.findAll('a', href=re.compile(".exe")):
     avg = link.get('href')
-    response, content = h.request(avg)
-    print(response.reason)
-    with open(avg.split('/')[-1], 'wb') as f:
-      f.write(content)
+    getFile(avg, avg.split('/')[-1])
 
 # Download AVG Remover
 def getAVGRemover():
-  print("Downloading AVG Remover (2012 x86, 2012 x64, 2013 x86, 2013 x64)...")
+  page = getPage("http://www.avg.com/ca-en/utilities/index.html")
 
-  response, content = h.request("http://www.avg.com/ca-en/utilities")
-  soup = BeautifulSoup(content)
+  if not page:
+    print('No data returned')
+    return
+  
+  soup = BeautifulSoup(page)
 
   for link in soup.findAll('a', href=re.compile("remover")):
     avgr = link.get('href')
-    response, content = h.request(avgr)
-    print(response.reason)
-    with open(avgr.split('/')[-1], 'wb') as f:
-      f.write(content)
+    getFile(avgr, avgr.split('/')[-1])
 
 # Download CCleaner portable
 def getCCleaner():
-  print("Downloading CCleaner...")
-
-  response, content = h.request('http://www.piriform.com/ccleaner/download/portable/downloadfile')
-
-  print(response.reason)
-
-  with open('CCleaner.zip', 'wb') as f:
-    f.write(content)
-      
-  createDir("CCleaner")
+  getFile('http://www.piriform.com/ccleaner/download/portable/downloadfile', 'CCleaner.zip')
   extract("CCleaner.zip", "CCleaner")
-  os.remove('CCleaner.zip')
 
 # Download ComboFix
 def getComboFix():
-  print("Downloading ComboFix...")
-
-  response, content = h.request('http://www.infospyware.net/sUBs/ComboFix.exe')
-
-  print(response.reason)
-
-  with open('ComboFix.exe', 'wb') as f:
-    f.write(content)
-
-# Download Flashplayer
-def getFlashPlayer():
-  print("Downloading Flashplayer for IE...")
-
-  response, content = h.request('http://download.macromedia.com/pub/flashplayer/current/support/install_flash_player_ax.exe')
-
-  print(response.reason)
-
-  with open('install_flash_player_ax.exe', 'wb') as f:
-    f.write(content)
-  
-  print("Downloading Flashplayer...")
-
-  response, content = h.request('http://download.macromedia.com/pub/flashplayer/current/support/install_flash_player.exe')
-
-  print(response.reason)
-
-  with open('install_flash_player.exe', 'wb') as f:
-    f.write(content)
+  getFile('http://www.infospyware.net/sUBs/ComboFix.exe', 'ComboFix.exe')
 
 # Download HijackThis
 def getHiJackThis():
-  print("Downloading HiJackThis...")
+  getFile('http://downloads.sourceforge.net/project/hjt/2.0.4/HijackThis.exe', 'HijackThis.exe')
 
-  response, content = h.request('http://downloads.sourceforge.net/project/hjt/2.0.4/HijackThis.exe')
-
-  print(response.reason)
-
-  with open('HijackThis.exe', 'wb') as f:
-    f.write(content)
+# Download JRT
+def getJRT():
+  getFile('http://thisisudax.org/downloads/JRT.exe', 'JRT.exe')
 
 # Download Kaspersky AVPTool
 def getKaspersky():
-  print("Downloading Kaspersky...")
+  page = getPage('http://devbuilds.kaspersky-labs.com/devbuilds/AVPTool/avptool11/')
+  
+  if not page:
+    print('No data returned')
+    return
 
-  response, content = h.request("http://devbuilds.kaspersky-labs.com/devbuilds/AVPTool/avptool11/")
-  soup = BeautifulSoup(content)
+  soup = BeautifulSoup(page)
   for link in soup.findAll('a'):
     avp = link.get('href')
 
-  response, content = h.request("http://devbuilds.kaspersky-labs.com/devbuilds/AVPTool/avptool11/" + avp)
+  getFile('http://devbuilds.kaspersky-labs.com/devbuilds/AVPTool/avptool11/' + avp, avp)
 
-  print(response.reason)
-
-  if response.status == 200:
-    for name in glob.glob('setup_11*'):
-      os.remove(name)
-
-  with open(avp, 'wb') as f:
-    f.write(content)
+  for name in glob.glob('setup_11*')[:-1]:
+    os.remove(name)
 
 # Download Malwarebytes
 def getMalwarebytes():
-  print("Downloading Malwarebytes...")
-
-  response, content = h.request('http://www.malwarebytes.org/mbam/program/mbam-setup.exe')
-
-  print(response.reason)
-
-  with open('mbam-setup.exe', 'wb') as f:
-    f.write(content)
+  getFile('http://downloads.malwarebytes.org/file/mbam/mbam-setup-2.0.4.1028.exe', 'mbam-setup.exe')
 
 # Download McAfee Removal Tool MCPR
 def getMcAfeeRemovalTool():
-  print("Downloading McAfee Removal Tool...")
-
-  response, content = h.request('http://download.mcafee.com/products/licensed/cust_support_patches/MCPR.exe')
-
-  print(response.reason)
-
-  with open('MCPR.exe', 'wb') as f:
-    f.write(content)
+  getFile('http://download.mcafee.com/products/licensed/cust_support_patches/MCPR.exe', 'MCPR.exe')
 
 # Download and extract Revo Portable
 def getRevoUninstaller():
-  print("Downloading Revo Uninistaller...")
-
-  response, content = h.request('http://www.revouninstaller.com/download/revouninstaller.zip')
-
-  print(response.reason)
-
-  with open('revouninstaller.zip', 'wb') as f:
-    f.write(content)
-      
+  getFile('http://www.revouninstaller.com/download/revouninstaller.zip', 'revouninstaller.zip')
   extract("revouninstaller.zip", ".")
-  os.remove('revouninstaller.zip')
 
 # Download SpyBot
 def getSpyBot():
-  print("Downloading SpyBot...")
-
-  response, content = h.request('http://www.spybotupdates.biz/files/spybotsd162.exe')
-
-  print(response.reason)
-
-  with open('spybotsd162.exe', 'wb') as f:
-    f.write(content)
+  getFile('http://www.spybotupdates.biz/files/spybotsd162.exe', 'spybotsd162.exe')
 
 # Download SpyBot 2
 def getSpyBot2():
-  print("Downloading SpyBot 2...")
-
-  response, content = h.request('http://files.spybot.info/SpybotSD2.exe')
-
-  print(response.reason)
-
-  with open('SpybotSD2.exe', 'wb') as f:
-    f.write(content)
+  getFile('http://files.spybot.info/SpybotSD2.exe', 'SpybotSD2.exe')
 
 # Download TDSSKiller
 def getTDSSKiller():
-  print("Downloading TDSSKiller...")
+  getFile('http://media.kaspersky.com/utilities/VirusUtilities/EN/tdsskiller.exe', 'tdsskiller.exe')
 
-  response, content = h.request('http://support.kaspersky.com/downloads/utils/tdsskiller.zip')
-
-  print(response.reason)
-
-  with open('tdsskiller.zip', 'wb') as f:
-    f.write(content)
-      
-  createDir("TDSSKiller")
-  extract("tdsskiller.zip", "TDSSKiller")
-  os.remove('tdsskiller.zip')
+# Create Download directory and make it the working directory
 
 createDir("Downloads")
 os.chdir("Downloads")
-h = httplib2.Http('.cache')
 
+# Load cache file
+
+if os.path.isfile('.cache'):
+  with open('.cache', 'rb') as f:
+    lastmod = pickle.load(f)
+else:
+  lastmod = {}
+
+# Call download functions
+
+getADWCleaner()
 getAusDefrag()
 getAvast()
 getAVG()
 getAVGRemover()
 getCCleaner()
 getComboFix()
-getFlashPlayer()
 getHiJackThis()
+getJRT()
 getKaspersky()
 getMalwarebytes()
 getMcAfeeRemovalTool()
